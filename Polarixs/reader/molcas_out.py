@@ -5,43 +5,39 @@ import numpy as np
 #  State Energy Reader  #
 #########################
 def molcas_energy(filename, SOC=False):
-    data = {}
+    """Read the relative state energies (eV) from a Molcas RASSI log.
 
-    if SOC:
-        start_line = 'SO State' 
-    else:
-        start_line = 'SF State' 
-        
-    with open(filename, 'r') as f:
-        lines = f.readlines()
+    Parses the 'SO State  Relative EMIN(au)  Rel lowest level(eV) ...' table (SOC=True)
+    or the 'SF State ...' table (SOC=False) and returns {state index: energy in eV}.
+
+    The rows are located by content rather than by a fixed number of header lines:
+    every line after the header is skipped until the first numeric row, and reading
+    stops at the first non-numeric line after that. This copes with headers that wrap
+    onto a second line, e.g. when RASSI adds a 'J-value' column for atoms.
+    """
+    data = {}
+    start_line = 'SO State' if SOC else 'SF State'
+    row = re.compile(r'^\s*(\d+)\s+([-0-9.Ee]+)\s+([-0-9.Ee]+)\s+([-0-9.Ee]+)')
 
     table_start = False
-    skip_line = False
-    return_line = False
+    rows_started = False
 
-    for line in lines:
-        if start_line in line:
-            table_start = True
-            skip_line = True
-            continue
-        if table_start:
-            if skip_line:
-                skip_line = False
+    with open(filename, 'r') as f:
+        for line in f:
+            if not table_start:
+                if start_line in line:
+                    table_start = True
                 continue
-
-            if line.strip() == "" or not re.match(r'^\s*\d+', line):
+            match = row.match(line)
+            if match:
+                rows_started = True
+                data[int(match.group(1))] = float(match.group(3))   # 'Rel lowest level(eV)'
+            elif rows_started:
                 break
 
-            match = re.match(r'^\s*(\d+)\s+([-0-9.Ee]+)\s+([-0-9.Ee]+)\s+([-0-9.Ee]+)', line)
-            if match:
-                state = int(match.group(1))
-                rel_ev = float(match.group(3))
-                data[int(state)] = rel_ev
-                
-    if not data and return_line:
-        return_line = True
+    if not data:
         print("Energy Data Reading Failed!")
-        
+
     return data
 
 ################################
@@ -98,6 +94,8 @@ def trans_int(filename, SOC=False, Quadrupole=False, Velocity=False):
 
 def intensity(filename, SOC=False, Quadrupole=False, Velocity=False, Subset=0, GStates = []): 
     energies = molcas_energy(filename, SOC)
+    if not energies:
+        raise ValueError(f"No {'SO' if SOC else 'SF'} state energies found in {filename}")
     transitions = np.array(trans_int(filename, SOC, Quadrupole, Velocity))
     
     if GStates:
@@ -187,6 +185,8 @@ def trans_vec(filename, SOC=False):
 
 def vector(filename, SOC=False, Subset=0, GStates = []): 
     energies = molcas_energy(filename, SOC)
+    if not energies:
+        raise ValueError(f"No {'SO' if SOC else 'SF'} state energies found in {filename}")
     transitions = np.array(trans_vec(filename, SOC))
     
     if GStates:
@@ -284,6 +284,8 @@ def tensor(filename, SOC=False, Quadrupole=False, Subset=0, GStates=[], Threshol
     data = {}
     
     energies = molcas_energy(filename, SOC)
+    if not energies:
+        raise ValueError(f"No {'SO' if SOC else 'SF'} state energies found in {filename}")
 
     if Quadrupole:
         txx = np.array(trans_ten(filename, SOC, 2, 1))
